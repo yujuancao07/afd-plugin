@@ -180,20 +180,29 @@ class AFDNPUAttentionModelRunner(NPUModelRunner):
         }
         run_model = partial(self.model, **model_inputs)
 
+        # The Ascend ubatch wrapper captures and replays all stage forwards in
+        # one NPUGraph. Its stage-local contexts intentionally use
+        # CUDAGraphMode.NONE, so they do not register entries in Ascend's
+        # standard full-graph parameter tables. Updating the outer context would
+        # therefore treat the per-stage metadata list as a single-batch dict.
+        update_standard_full_graph = forward_context.ubatch_slices is None
+
         if self.enable_enpu:
-            self._update_full_graph_params_if_needed(
-                forward_context,
-                num_tokens_padded,
-                positions,
-            )
+            if update_standard_full_graph:
+                self._update_full_graph_params_if_needed(
+                    forward_context,
+                    num_tokens_padded,
+                    positions,
+                )
             hidden_states = run_model()
         else:
             hidden_states = run_model()
-            self._update_full_graph_params_if_needed(
-                forward_context,
-                num_tokens_padded,
-                positions,
-            )
+            if update_standard_full_graph:
+                self._update_full_graph_params_if_needed(
+                    forward_context,
+                    num_tokens_padded,
+                    positions,
+                )
 
         if (
             forward_context.flash_comm_v1_enabled
